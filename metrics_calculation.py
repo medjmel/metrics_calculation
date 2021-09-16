@@ -13,6 +13,18 @@ from datetime import date
 from tqdm import tqdm
 import math
 
+def format_tbl(writer, sheet_name, df):
+    outcols = df.columns
+    if len(outcols) > 25:
+        raise ValueError('table width out of range for current logic')
+    tbl_hdr = [{'header':c} for c in outcols]
+    bottom_num = len(df)+1
+    right_letter = chr(65-1+len(outcols))
+    tbl_corner = right_letter + str(bottom_num)
+
+    worksheet = writer.sheets[sheet_name]
+    worksheet.add_table('A1:' + tbl_corner,  {'columns':tbl_hdr})
+
 
 #############################################################################
 ##################         9018-28-29-9330         ##########################
@@ -228,96 +240,290 @@ notif_filtered_and_under_scope = notif_filtered[notif_filtered['Notif status']==
 print('-------------------------------------')
 print('Scope added to notif')
 
-#####Calculate metrics
-metrics = pd.DataFrame(columns = ['Metric', 'Value wo filters',
-                                  'Value with filters', 'Value with filters and under scope DDSO'])
 
 
 notif = notif.drop_duplicates(subset=['Notif. ID'])
 notif_filtered = notif_filtered.drop_duplicates(subset=['Notif. ID'])
 notif_filtered_and_under_scope = notif_filtered_and_under_scope.drop_duplicates(subset=['Notif. ID'])
 
-############################# High level ##################################
+
+#####Calculate metrics
+metrics = pd.DataFrame(columns = ['Metric', 'How', 'Value wo filters',
+                                  'Value with filters', 'Value with filters and under scope DDSO'])
+
+########################################################################
+########################################################################
+############################# Block 1 ##################################
+########################################################################
+########################################################################
 ####Add number of notifications 
 notif_qty = len(notif)
 notif_qty_filters = len(notif_filtered)
 notif_qty_filters_under_scope = len(notif_filtered_and_under_scope)
-serie = ['Qty of notifications', notif_qty, notif_qty_filters, notif_qty_filters_under_scope]
+serie = ['Number of SAP notifications',
+         'Count of notifications from notifications file',
+         notif_qty,
+         notif_qty_filters,
+         notif_qty_filters_under_scope]
+metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
+
+### Origin Flow = ON SITE
+serie = ['Number of ON SITE notifications',
+         'Count of notifications where: Origin Flow = ON SITE',
+         len(notif[notif['Notif. Origin Flow']=='ON SITE']), 
+         len(notif_filtered[notif_filtered['Notif. Origin Flow']=='ON SITE']), 
+         len(notif_filtered_and_under_scope[notif_filtered_and_under_scope['Notif. Origin Flow']=='ON SITE'])]
+metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
+
+### Origin Flow = OTHERS
+serie = ['Number of OTHERS notifications',
+         'Count of notifications where: Origin Flow = OTHERS',
+         len(notif[notif['Notif. Origin Flow']=='OTHERS']), 
+         len(notif_filtered[notif_filtered['Notif. Origin Flow']=='OTHERS']), 
+         len(notif_filtered_and_under_scope[notif_filtered_and_under_scope['Notif. Origin Flow']=='OTHERS'])]
+metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
+
+### Origin Flow = AES
+serie = ['Number of AES notifications',
+         'Count of notifications where: Origin Flow = AES',
+         len(notif[notif['Notif. Origin Flow']=='AES']), 
+         len(notif_filtered[notif_filtered['Notif. Origin Flow']=='AES']), 
+         len(notif_filtered_and_under_scope[notif_filtered_and_under_scope['Notif. Origin Flow']=='AES'])]
+metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
+
+### Origin Flow = Help Desk
+serie = ['Number of Help Desk notifications method',
+         'Count of notifications where: Origin Flow = Help Desk',
+         len(notif[notif['Notif. Origin Flow']=='HELPDESK']), 
+         len(notif_filtered[notif_filtered['Notif. Origin Flow']=='HELPDESK']), 
+         len(notif_filtered_and_under_scope[notif_filtered_and_under_scope['Notif. Origin Flow']=='HELPDESK'])]
+metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
+
+
+
+
+########################################################################
+########################################################################
+############################# Block 2 ##################################
+########################################################################
+########################################################################
+####Add quantity of notif wo cs order
+notif_wo_cs_qty = len(notif[notif['CS Order ID']=='#'])
+notif_wo_cs_qty_filters = len(notif_filtered[notif_filtered['CS Order ID']=='#'])
+serie = ['Number of notifications without CS order',
+         'Count of notifications where CS Order ID == #',
+         notif_wo_cs_qty,
+         notif_wo_cs_qty_filters,
+         np.NaN]
 metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
 
 ###Add number of cs orders
 cs_orders_qty = len(notif['CS Order ID'].unique())
 cs_orders_qty_filters = len(notif_filtered['CS Order ID'].unique())
 cs_orders_qty_filters_under_scope = len(notif_filtered_and_under_scope['CS Order ID'].unique())
-serie = ['Qty of CS Order', cs_orders_qty, cs_orders_qty_filters, cs_orders_qty_filters_under_scope]
+serie = ['Number of field intervention',
+         'Count distinct CS Order ID from notifications file',
+         cs_orders_qty,
+         cs_orders_qty_filters,
+         cs_orders_qty_filters_under_scope]
 metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
+
+####Qty cs orders without sap mvt
+cs_orders_qty_wo_sap = len(notif[~notif['CS Order ID'].isin(sap_mvt['Order'].unique())]['CS Order ID'].unique())
+cs_orders_qty_wo_sap_filters = len(notif_filtered[~notif_filtered['CS Order ID'].isin(sap_mvt['Order'].unique())]['CS Order ID'].unique())
+cs_orders_qty_wo_sap_filters_under_scope = len(notif_filtered_and_under_scope[~notif_filtered_and_under_scope['CS Order ID'].isin(sap_mvt['Order'].unique())]['CS Order ID'].unique())
+serie = ['Number of field interventions not tracked in SAP mvt',
+         'Count distinct CS Order ID from notifications file where CS Order ID not in SAP mvt',
+         cs_orders_qty_wo_sap, cs_orders_qty_wo_sap_filters,
+         cs_orders_qty_wo_sap_filters_under_scope]
+metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
+
 
 ###Add number of cs orders with part changement
 cs_orders_qty_w_parts_changed = len(notif[notif['Quantity']>0]['CS Order ID'].unique())
 cs_orders_qty_w_parts_changed_filters = len(notif_filtered[notif_filtered['Quantity']>0]['CS Order ID'].unique())
 cs_orders_qty_w_parts_changed_filters_under_scope = len(notif_filtered_and_under_scope[notif_filtered_and_under_scope['Quantity']>0]['CS Order ID'].unique())
-serie = ['Qty of CS Order with parts changed', cs_orders_qty_w_parts_changed,
-         cs_orders_qty_w_parts_changed_filters, cs_orders_qty_w_parts_changed_filters_under_scope]
+serie = ['Number of field interventions with parts replacement',
+         'Count distinct CS Order ID from notifications file where the quantity of repalced part from SAP mvt is > 0', 
+         cs_orders_qty_w_parts_changed,
+         cs_orders_qty_w_parts_changed_filters, 
+         cs_orders_qty_w_parts_changed_filters_under_scope]
 metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
 
-#######Qty notif without mention in sap and with activity part replaced#######
-qty_notif_wo_sap_mvt_w_replaced_part = len(notif[(~notif['Parts changed'].notnull()) & (notif['Activity']=='Replaced part')])
-qty_notif_wo_sap_mvt_w_replaced_part_filters = len(notif_filtered[(~notif_filtered['Parts changed'].notnull()) & (notif_filtered['Activity']=='Replaced part')])
-qty_notif_wo_sap_mvt_w_replaced_part_filters_under_scope = len(notif_filtered_and_under_scope[(~notif_filtered_and_under_scope['Parts changed'].notnull()) & (notif_filtered_and_under_scope['Activity']=='Replaced part')])
-serie = ['Qty of Notifications without SAP mvt and with Activity = Replaced part',
-         qty_notif_wo_sap_mvt_w_replaced_part, qty_notif_wo_sap_mvt_w_replaced_part_filters,
-         qty_notif_wo_sap_mvt_w_replaced_part_filters_under_scope]
+###qty cs order with sap mvt and qty==0
+cs_orders_qty_wo_parts_changed_sap = len(notif[notif['Quantity']==0]['CS Order ID'].unique())
+cs_orders_qty_wo_parts_changed_sap_filters = len(notif_filtered[notif_filtered['Quantity']==0]['CS Order ID'].unique())
+cs_orders_qty_wo_parts_changed_sap_filters_under_scope = len(notif_filtered_and_under_scope[notif_filtered_and_under_scope['Quantity']==0]['CS Order ID'].unique())
+serie = ['Number of field interventions tracked in SAP mvt but quantity = 0',
+         'Count distinct CS Order ID from notifications file where the quantity of repalced part from SAP mvt is = 0',
+         cs_orders_qty_wo_parts_changed_sap, cs_orders_qty_wo_parts_changed_sap_filters,
+         cs_orders_qty_wo_parts_changed_sap_filters_under_scope]
 metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
-
-
 
 #######Qty notif mention in sap with quantity equal to 0 and with activity part replaced#######
 qty_notif_w_sap_mvt_qty_0_w_replaced_part = len(notif[(notif['Parts changed'].notnull()) &(notif['Quantity']==0) & (notif['Activity']=='Replaced part')])
 qty_notif_w_sap_mvt_qty_0_w_replaced_part_filters = len(notif_filtered[(notif_filtered['Parts changed'].notnull()) &(notif['Quantity']==0) & (notif_filtered['Activity']=='Replaced part')])
 qty_notif_w_sap_mvt_qty_0_w_replaced_part_filters_under_scope = len(notif_filtered_and_under_scope[(notif_filtered_and_under_scope['Parts changed'].notnull()) &(notif['Quantity']==0) & (notif_filtered_and_under_scope['Activity']=='Replaced part')])
-serie = ['Qty of Notifications with SAP mvt but quantity equal to 0 and with Activity = Replaced part',
+serie = ['Number of field interventions with SAP mvt but quantity equal to 0 and with Activity = Replaced part',
+         'Count of notifications from notifications file with SAP mvt but quantity equal to 0 and with Activity = Replaced part',
          qty_notif_w_sap_mvt_qty_0_w_replaced_part, 
          qty_notif_w_sap_mvt_qty_0_w_replaced_part_filters,
          qty_notif_w_sap_mvt_qty_0_w_replaced_part_filters_under_scope]
 metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
 
 
+#######Qty notif without mention in sap and with activity part replaced#######
+qty_notif_wo_sap_mvt_w_replaced_part = len(notif[(~notif['Parts changed'].notnull()) & (notif['Activity']=='Replaced part')])
+qty_notif_wo_sap_mvt_w_replaced_part_filters = len(notif_filtered[(~notif_filtered['Parts changed'].notnull()) & (notif_filtered['Activity']=='Replaced part')])
+qty_notif_wo_sap_mvt_w_replaced_part_filters_under_scope = len(notif_filtered_and_under_scope[(~notif_filtered_and_under_scope['Parts changed'].notnull()) & (notif_filtered_and_under_scope['Activity']=='Replaced part')])
+serie = ['Number of field interventions with parts replacement not reported in SAP',
+         "Count of notifications from notifications file where the notifications don't have an SAP mvt but Activity = Replaced part",
+         qty_notif_wo_sap_mvt_w_replaced_part, 
+         qty_notif_wo_sap_mvt_w_replaced_part_filters,
+         qty_notif_wo_sap_mvt_w_replaced_part_filters_under_scope]
+metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
+
+###Number of interventions with actual replacement
+serie = ['Number of interventions with actual replacement',
+         "Count distinct CS Order ID from notifications file where the quantity of repalced part from SAP mvt is > 0 + Count of notifications from notifications file where the notifications don't have an SAP mvt but Activity = Replaced part",
+         qty_notif_wo_sap_mvt_w_replaced_part + cs_orders_qty_w_parts_changed, 
+         qty_notif_wo_sap_mvt_w_replaced_part_filters + cs_orders_qty_w_parts_changed_filters,
+         qty_notif_wo_sap_mvt_w_replaced_part_filters_under_scope + cs_orders_qty_w_parts_changed_filters_under_scope]
+metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
+
+
+
+########################################################################
+########################################################################
+############################# Block 3 ##################################
+########################################################################
+########################################################################
+####Add quantity of printers in notif
+qty_printers_notif = len(set(notif['Sup.Equip. Serial Nb'].to_list()))
+qty_printers_notif_filtered = len(set(notif_filtered['Sup.Equip. Serial Nb'].to_list()))   
+qty_printers_notif_filtered_under_scope = len(set(notif_filtered_and_under_scope['Sup.Equip. Serial Nb'].to_list()))                      
+serie = ['Number of Printers in notifications file',
+         'Count distinct Sup.Equip. Serial Nb from notifications file',
+         qty_printers_notif,
+         qty_printers_notif_filtered, 
+         qty_printers_notif_filtered_under_scope]
+metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
 
 ####Add quantity of printers
 qty_printers = len(set(IB['Equipment'].to_list()))
 qty_printers_filtered = len(set(IB_filtered['Equipment'].to_list()))   
 qty_printers_filtered_under_scope = len(set(IB_filtered_and_under_scope['Equipment'].to_list()))                      
-serie = ['Qty of Printers in Global IB', qty_printers, qty_printers_filtered, qty_printers_filtered_under_scope]
+serie = ['Number of Printers in Global IB',
+         'Count distinct Equipment from IB file', 
+         qty_printers, 
+         qty_printers_filtered, 
+         qty_printers_filtered_under_scope]
 metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
 
-####Add quantity of printers in notif
-qty_printers_notif = len(set(notif['Sup.Equip. Serial Nb'].to_list()))
-qty_printers_notif_filtered = len(set(notif_filtered['Sup.Equip. Serial Nb'].to_list()))   
-qty_printers_notif_filtered_under_scope = len(set(notif_filtered_and_under_scope['Sup.Equip. Serial Nb'].to_list()))                      
-serie = ['Qty of Printers in notif file', qty_printers_notif, qty_printers_notif_filtered, qty_printers_notif_filtered_under_scope]
+
+###Qty of Printers in Global IB MI Direct : Status = INST
+serie = ['Number of active printers in Global IB MI Direct',
+         'Count of Equipment from Global IB where Sales Channel = MI Direct & Status = INST',
+         len(IB[(IB['Sales Channel'].isin(sales_channel))&(IB['Number \nof equipment\n(INST)']==1)]), 
+         len(IB_filtered[(IB_filtered['Sales Channel'].isin(sales_channel))&(IB_filtered['Number \nof equipment\n(INST)']==1)]),
+         np.NaN]
 metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
 
-####Add quantity of notif wo cs order
-notif_wo_cs_qty = len(notif[notif['CS Order ID']=='#'])
-notif_wo_cs_qty_filters = len(notif_filtered[notif_filtered['CS Order ID']=='#'])
-serie = ['Qty of Notifications Wo CS order', notif_wo_cs_qty, notif_wo_cs_qty_filters, np.NaN]
+###Qty of Printers in Global IB MI Direct Under contract
+serie = ['Number of active printers in Global IB MI Direct under contract',
+         'Count of Equipment from Global IB where Sales Channel = MI Direct & Status = INST & Contract Status = Under Contract',
+         len(IB[(IB['Sales Channel'].isin(sales_channel))&(IB['Number \nof equipment\n(INST)']==1)&(IB['Contract Status']=='Under Contract')]), 
+         len(IB_filtered[(IB_filtered['Sales Channel'].isin(sales_channel))&(IB_filtered['Number \nof equipment\n(INST)']==1)&(IB_filtered['Contract Status']=='Under Contract')]),
+         np.NaN]
 metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
 
+###Qty of Printers in Global IB MI Direct Out of contract
+serie = ['Number of active printers in Global IB MI Direct out of contract',
+         'Count of Equipment from Global IB where Sales Channel = MI Direct & Status = INST & Contract Status = Out of Contract',
+         len(IB[(IB['Sales Channel'].isin(sales_channel))&(IB['Number \nof equipment\n(INST)']==1)&(IB['Contract Status']=='Out of Contract')]), 
+         len(IB_filtered[(IB_filtered['Sales Channel'].isin(sales_channel))&(IB_filtered['Number \nof equipment\n(INST)']==1)&(IB_filtered['Contract Status']=='Out of Contract')]),
+         np.NaN]
+metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
+
+
+###Qty of Printers in Global IB MI Direct Under contract: Standard
+serie = ['Number of active printers in Global IB MI Direct under Standard contract',
+         'Count of Equipment from Global IB where Sales Channel = MI Direct & Status = INST & Contract Status = Under Contract & Contract Nature = Standard',
+         len(IB[(IB['Sales Channel'].isin(sales_channel))&(IB['Number \nof equipment\n(INST)']==1)&(IB['Contract Status']=='Under Contract')&(IB['Contract Nature']=='Standard')]), 
+         len(IB_filtered[(IB_filtered['Sales Channel'].isin(sales_channel))&(IB_filtered['Number \nof equipment\n(INST)']==1)&(IB_filtered['Contract Status']=='Under Contract')&(IB_filtered['Contract Nature']=='Standard')]),
+         np.NaN]
+metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
+
+###Qty of Printers in Global IB MI Direct Under contract: Premium
+serie = ['Number of active printers in Global IB MI Direct under Premium contract',
+         'Count of Equipment from Global IB where Sales Channel = MI Direct & Status = INST & Contract Status = Under Contract & Contract Nature = Premium',
+         len(IB[(IB['Sales Channel'].isin(sales_channel))&(IB['Number \nof equipment\n(INST)']==1)&(IB['Contract Status']=='Under Contract')&(IB['Contract Nature']=='Premium')]), 
+         len(IB_filtered[(IB_filtered['Sales Channel'].isin(sales_channel))&(IB_filtered['Number \nof equipment\n(INST)']==1)&(IB_filtered['Contract Status']=='Under Contract')&(IB_filtered['Contract Nature']=='Premium')]),
+         np.NaN]
+metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
+
+###Qty of Printers in Global IB MI Direct Under contract: Access
+serie = ['Number of active printers in Global IB MI Direct under Access contract',
+         'Count of Equipment from Global IB where Sales Channel = MI Direct & Status = INST & Contract Status = Under Contract & Contract Nature = Access',
+         len(IB[(IB['Sales Channel'].isin(sales_channel))&(IB['Number \nof equipment\n(INST)']==1)&(IB['Contract Status']=='Under Contract')&(IB['Contract Nature']=='Access')]), 
+         len(IB_filtered[(IB_filtered['Sales Channel'].isin(sales_channel))&(IB_filtered['Number \nof equipment\n(INST)']==1)&(IB_filtered['Contract Status']=='Under Contract')&(IB_filtered['Contract Nature']=='Access')]),
+         np.NaN]
+metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
+
+###Qty of Printers in Global IB MI Direct Under contract: Warranty Extension
+serie = ['Number of active printers in Global IB MI Direct under Warranty Extension contract',
+         'Count of Equipment from Global IB where Sales Channel = MI Direct & Status = INST & Contract Status = Under Contract & Contract Nature = Warranty Extension',
+         len(IB[(IB['Sales Channel'].isin(sales_channel))&(IB['Number \nof equipment\n(INST)']==1)&(IB['Contract Status']=='Under Contract')&(IB['Contract Nature']=='Warranty Extension')]), 
+         len(IB_filtered[(IB_filtered['Sales Channel'].isin(sales_channel))&(IB_filtered['Number \nof equipment\n(INST)']==1)&(IB_filtered['Contract Status']=='Under Contract')&(IB_filtered['Contract Nature']=='Warranty Extension')]),
+         np.NaN]
+metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
+
+###Qty of Printers in Global IB MI Direct Under contract: Rental
+serie = ['Number of active printers in Global IB MI Direct under Rental contract',
+         'Count of Equipment from Global IB where Sales Channel = MI Direct & Status = INST & Contract Status = Under Contract & Contract Nature = Rental',
+         len(IB[(IB['Sales Channel'].isin(sales_channel))&(IB['Number \nof equipment\n(INST)']==1)&(IB['Contract Status']=='Under Contract')&(IB['Contract Nature']=='Rental')]), 
+         len(IB_filtered[(IB_filtered['Sales Channel'].isin(sales_channel))&(IB_filtered['Number \nof equipment\n(INST)']==1)&(IB_filtered['Contract Status']=='Under Contract')&(IB_filtered['Contract Nature']=='Rental')]), 
+         np.NaN]
+metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
+
+###Qty of Printers in Global IB MI Direct Under contract: Not assigned
+serie = ['Number of active printers in Global IB MI Direct under Not assigned contract',
+         'Count of Equipment from Global IB where Sales Channel = MI Direct & Status = INST & Contract Status = Under Contract & Contract Nature = Not assigned',
+         len(IB[(IB['Sales Channel'].isin(sales_channel))&(IB['Number \nof equipment\n(INST)']==1)&(IB['Contract Status']=='Under Contract')&(IB['Contract Nature']=='Not assigned')]), 
+         len(IB_filtered[(IB['Sales Channel'].isin(sales_channel))&(IB_filtered['Number \nof equipment\n(INST)']==1)&(IB_filtered['Contract Status']=='Under Contract')&(IB_filtered['Contract Nature']=='Not assigned')]), np.NaN]
+metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
+
+
+
+
+
+
+
+
+
+########################################################################
+########################################################################
+############################# Block 4 ##################################
+########################################################################
+########################################################################
 ########################Metrcis related to notif############################ 
 ####Sales Channel = Mi Direct
-serie = ['Qty Of Notification : Sales Channel = Mi Direct',
+serie = ['Number of MI Direct notifications',
+         'Count notifications from notifications file where: Sales Channel = Mi Direct',
          len(notif[notif['Sales Channel']=='MI_Direct']), 
          len(notif_filtered[notif_filtered['Sales Channel']=='MI_Direct']),
          len(notif_filtered_and_under_scope[notif_filtered_and_under_scope['Sales Channel']=='MI_Direct'])]
 metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
 ####Sales Channel = International_Partners
-serie = ['Qty Of Notification : Sales Channel = International_Partners',
+serie = ['Number of International Partners notifications',
+         'Count notifications from notifications file where: Sales Channel = International_Partners',
          len(notif[notif['Sales Channel']=='International_Partners']),
          len(notif_filtered[notif_filtered['Sales Channel']=='International_Partners']), 
          len(notif_filtered_and_under_scope[notif_filtered_and_under_scope['Sales Channel']=='International_Partners'])]
 metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
 ####Sales Channel = Local_Partners
-serie = ['Qty Of Notification : Sales Channel = Local_Partners',
+serie = ['Number of Local Partners notifications',
+         'Count notifications from notifications file where: Sales Channel = Local_Partners',
          len(notif[notif['Sales Channel']=='Local_Partners']), 
          len(notif_filtered[notif_filtered['Sales Channel']=='Local_Partners']), 
          len(notif_filtered_and_under_scope[notif_filtered_and_under_scope['Sales Channel']=='Local_Partners'])]
@@ -325,227 +531,175 @@ metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=T
 
 
 
-### Origin Flow = AES
-serie = ['Qty Of Notification : Origin Flow = AES',
-         len(notif[notif['Notif. Origin Flow']=='AES']), 
-         len(notif_filtered[notif_filtered['Notif. Origin Flow']=='AES']), 
-         len(notif_filtered_and_under_scope[notif_filtered_and_under_scope['Notif. Origin Flow']=='AES'])]
-metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
-
-### Origin Flow = Help Desk
-serie = ['Qty Of Notification : Origin Flow = Help Desk',
-         len(notif[notif['Notif. Origin Flow']=='HELPDESK']), 
-         len(notif_filtered[notif_filtered['Notif. Origin Flow']=='HELPDESK']), 
-         len(notif_filtered_and_under_scope[notif_filtered_and_under_scope['Notif. Origin Flow']=='HELPDESK'])]
-metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
-
-### Origin Flow = ON SITE
-serie = ['Qty Of Notification : Origin Flow = ON SITE',
-         len(notif[notif['Notif. Origin Flow']=='ON SITE']), 
-         len(notif_filtered[notif_filtered['Notif. Origin Flow']=='ON SITE']), 
-         len(notif_filtered_and_under_scope[notif_filtered_and_under_scope['Notif. Origin Flow']=='ON SITE'])]
-metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
 
 
-### Origin Flow = OTHERS
-serie = ['Qty Of Notification : Origin Flow = OTHERS',
-         len(notif[notif['Notif. Origin Flow']=='OTHERS']), 
-         len(notif_filtered[notif_filtered['Notif. Origin Flow']=='OTHERS']), 
-         len(notif_filtered_and_under_scope[notif_filtered_and_under_scope['Notif. Origin Flow']=='OTHERS'])]
-metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
 
+
+
+
+########################################################################
+########################################################################
+############################# Block 5 ##################################
+########################################################################
+########################################################################
 ##########################Metrics related to cs orders ######################
 ###MI_Direct
 cs_orders_qty_MI_Direct = len(notif[(notif['Sup.Equip. Serial Nb'].isin(IB[IB['Sales Channel'].isin(sales_channel)]['Equipment'].unique()))&(notif['Sales Channel']=='MI_Direct')]['CS Order ID'].unique())
 cs_orders_qty_MI_Direct_filtered = len(notif_filtered[(notif_filtered['Sup.Equip. Serial Nb'].isin(IB[IB['Sales Channel'].isin(sales_channel)]['Equipment'].unique()))&(notif_filtered['Sales Channel']=='MI_Direct')]['CS Order ID'].unique())
 cs_orders_qty_MI_Direct_filtered_underscope = len(notif_filtered_and_under_scope[(notif_filtered_and_under_scope['Sup.Equip. Serial Nb'].isin(IB[IB['Sales Channel'].isin(sales_channel)]['Equipment'].unique()))&(notif_filtered_and_under_scope['Sales Channel']=='MI_Direct')]['CS Order ID'].unique())
-serie = ['Qty of CS order include in Mi Direct (IB & Notif)',
-         cs_orders_qty_MI_Direct, cs_orders_qty_MI_Direct_filtered, cs_orders_qty_MI_Direct_filtered_underscope]
+serie = ['Number of CS order included in Mi Direct (IB & Notif)',
+         'Count distinct CS Order ID from notifications file where Sup.Equip. Serial Nb is MI_Direct in IB file and MI_Direct in notifications file',
+         cs_orders_qty_MI_Direct, 
+         cs_orders_qty_MI_Direct_filtered,
+         cs_orders_qty_MI_Direct_filtered_underscope]
 metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
+
 ###MI_Direct and sub codes
 cs_orders_qty_MI_Direct_sub_codes = len(notif[(notif['Sup.Equip. Serial Nb'].isin(IB[IB['Sales Channel'].isin(sales_channel)]['Equipment'].unique()))&\
                                               (notif['Sales Channel']=='MI_Direct')&\
                                               (notif['Maint. Activity Type'].isin(sub_codes))]['CS Order ID'].unique())
 cs_orders_qty_MI_Direct_sub_codes_filtered = len(notif_filtered[(notif_filtered['Sup.Equip. Serial Nb'].isin(IB[IB['Sales Channel'].isin(sales_channel)]['Equipment'].unique()))]['CS Order ID'].unique())
 cs_orders_qty_MI_Direct_sub_codes_underscope = len(notif_filtered_and_under_scope[(notif_filtered_and_under_scope['Sup.Equip. Serial Nb'].isin(IB[IB['Sales Channel'].isin(sales_channel)]['Equipment'].unique()))]['CS Order ID'].unique())
-serie = ['Qty of CS order include in Mi Direct & SubCode Scope',
-         cs_orders_qty_MI_Direct_sub_codes, cs_orders_qty_MI_Direct_sub_codes_filtered, cs_orders_qty_MI_Direct_sub_codes_underscope]
+serie = ['Number of CS order included in Mi Direct (IB & Notif) & SubCode Scope',
+         'Count distinct CS Order ID from notifications file where Sup.Equip. Serial Nb is MI_Direct in IB file and MI_Direct in notifications file & Maint. Activity Type in DDSO subcodes scope',
+         cs_orders_qty_MI_Direct_sub_codes, 
+         cs_orders_qty_MI_Direct_sub_codes_filtered, 
+         cs_orders_qty_MI_Direct_sub_codes_underscope]
 metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
 
+
+
+
+
+
+
+########################################################################
+########################################################################
+############################# Block 6 ##################################
+########################################################################
+########################################################################
 #######################Metrics related to global IB#########################
 ###Qty of Printers in Global IB : Sales Channel = International_Partners
 qty_printers_International_Partners = len(set(IB[IB['Sales Channel']=='International_Partners']['Equipment'].to_list()))
-serie = ['Qty of Printers in Global IB : Sales Channel = International_Partners',
-         qty_printers_International_Partners, np.NaN, np.NaN]
+serie = ['Number of International Partners sales',
+         'Count distinct Equipment from IB file where: Sales Channel = International_Partners',
+         qty_printers_International_Partners,
+         np.NaN, 
+         np.NaN]
 metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
+
 ###Qty of Printers in Global IB : Sales Channel = Local_Partners
 qty_printers_Local_Partners = len(set(IB[IB['Sales Channel']=='Local_Partners']['Equipment'].to_list()))
-serie = ['Qty of Printers in Global IB : Sales Channel = Local_Partners',
-         qty_printers_Local_Partners, np.NaN, np.NaN]
+serie = ['Number of Local Partners sales',
+         'Count distinct Equipment from IB file where: Sales Channel = Local_Partners',
+         qty_printers_Local_Partners,
+         np.NaN,
+         np.NaN]
 metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
+
 ###Qty of Printers in Global IB : Sales Channel = Mi Direct
 qty_printers_MI_Direct = len(set(IB[IB['Sales Channel']=='MI_Direct']['Equipment'].to_list()))
-serie = ['Qty of Printers in Global IB : Sales Channel = Mi Direct',
-         qty_printers_MI_Direct, np.NaN, np.NaN]
+serie = ['Number of MI Direct sales',
+         'Count distinct Equipment from IB file where: Sales Channel = MI_Direct',
+         qty_printers_MI_Direct, 
+         np.NaN, 
+         np.NaN]
 metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
+
+
+
+########################################################################
+########################################################################
+############################# Block 7 ##################################
+########################################################################
+########################################################################
 ####Qty of Printers in Global IB : Sales Channel = Mi Direct & In Ship To classification Scope ( 10/11/15/16/51/52/53/98)
 qty_printers_MI_Direct_ship_to = len(set(IB[(IB['Sales Channel']=='MI_Direct')&\
                                             (IB['Ship-to Classification'].isin(ship_to_classification))]['Equipment'].to_list()))
-serie = ['Qty of Printers in Global IB : Sales Channel = Mi Direct & In Ship To classification Scope',
-         qty_printers_MI_Direct_ship_to, np.NaN, np.NaN]
+serie = ['Number of MI Direct printers in IB belonging to Ship-to Classification scope',
+         'Count disctint Equipment from Global IB where: Sales Channel = Mi Direct & Ship-to Classification belongs to Scope',
+         qty_printers_MI_Direct_ship_to,
+         np.NaN,
+         np.NaN]
 metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
+
 ####Qty of Printers in Global IB : Sales Channel = Mi Direct & In Ship To classification Scope ( 10/11/15/16/51/52/53/98) & Sales Org Filters applay
 qty_printers_MI_Direct_ship_to_sales_org = len(set(IB[(IB['Sales Channel']=='MI_Direct')&\
                                             (IB['Ship-to Classification'].isin(ship_to_classification))&\
                                                 (IB['Sales Organization'].isin(sales_org ))]['Equipment'].to_list()))
-serie = ['Qty of Printers in Global IB : Sales Channel = Mi Direct & In Ship To classification Scope & Sales Org Filters applay',
-         qty_printers_MI_Direct_ship_to_sales_org, np.NaN, np.NaN]
+serie = ['Number of MI Direct printers in IB belonging to Ship-to Classification and Sales Organization scope',
+         'Count disctint Equipment from Global IB where: Sales Channel = Mi Direct & Ship-to Classification belongs to Scope & Sales Org belongs to scope',
+         qty_printers_MI_Direct_ship_to_sales_org,
+         np.NaN,
+         np.NaN]
 metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
+
 ####Qty of Printers in Global IB : Sales Channel = Mi Direct & In Ship To classification Scope ( 10/11/15/16/51/52/53/98) & Sales Org Filters applay & Family Filters apply
 qty_printers_MI_Direct_ship_to_sales_org_family = len(set(IB[(IB['Sales Channel']=='MI_Direct')&\
                                             (IB['Ship-to Classification'].isin(ship_to_classification))&\
                                                 (IB['Sales Organization'].isin(sales_org ))&\
                                                     (IB['Ind. family - lev. 1'].isin(sectors_filter))]['Equipment'].to_list()))
-serie = ['Qty of Printers in Global IB : Sales Channel = Mi Direct & In Ship To classification Scope & Sales Org Filters applay & Family Filters apply',
-         qty_printers_MI_Direct_ship_to_sales_org_family, np.NaN, np.NaN]
+serie = ['Number of MI Direct printers in IB belonging to Ship-to Classification, Sales Organization and Family scope',
+         'Count disctint Equipment from Global IB where: Sales Channel = Mi Direct & Ship-to Classification belongs to Scope & Sales Org belongs to scope & Family belongs to scope',
+         qty_printers_MI_Direct_ship_to_sales_org_family, 
+         np.NaN,
+         np.NaN]
 metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
 
 
+
+
+########################################################################
+########################################################################
+############################# Block 8 ##################################
+########################################################################
+########################################################################
 ####Qty of Sales Organization # (No Filters)
-serie = ['Qty of Sales Organization # (No Filters)',
-         len(IB[IB['Sales Organization']=='#']), np.NaN, np.NaN]
+serie = ['Number of printers with sales organization not specified',
+         'Count printers from IB file where: Sales Organization = #',
+         len(IB[IB['Sales Organization']=='#']),
+         np.NaN,
+         np.NaN]
 metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
 
 ###Ship to country not assigned
-serie = ['Ship to country not assigned',
-         len(IB[IB['Ship-to Country']=='#']), np.NaN, np.NaN]
+serie = ['Number of printers with country not specified',
+         'Count printers from IB file where: Ship-to Country = #',
+         len(IB[IB['Ship-to Country']=='#']),
+         np.NaN,
+         np.NaN]
 metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
 
 
 
 
-#######  GLOBAL IB : Installed at exctraction Time Filters apply (Mi direct)###########
-###Qty of Printers in Global IB MI Direct : Status = INST
-serie = ['Qty of Printers in Global IB MI Direct & Status = INST',
-         len(IB[(IB['Sales Channel'].isin(sales_channel))&(IB['Number \nof equipment\n(INST)']==1)]), 
-         len(IB_filtered[(IB_filtered['Sales Channel'].isin(sales_channel))&(IB_filtered['Number \nof equipment\n(INST)']==1)]), np.NaN]
-metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
-###Qty of Printers in Global IB MI Direct Under contract
-serie = ['Qty of Printers in Global IB MI Direct & Under contract',
-         len(IB[(IB['Sales Channel'].isin(sales_channel))&(IB['Number \nof equipment\n(INST)']==1)&(IB['Contract Status']=='Under Contract')]), 
-         len(IB_filtered[(IB_filtered['Sales Channel'].isin(sales_channel))&(IB_filtered['Number \nof equipment\n(INST)']==1)&(IB_filtered['Contract Status']=='Under Contract')]), np.NaN]
-metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
-###Qty of Printers in Global IB MI Direct Under contract: Standard
-serie = ['Qty of Printers in Global IB MI Direct & Under contract: Standard',
-         len(IB[(IB['Sales Channel'].isin(sales_channel))&(IB['Number \nof equipment\n(INST)']==1)&(IB['Contract Status']=='Under Contract')&(IB['Contract Nature']=='Standard')]), 
-         len(IB_filtered[(IB_filtered['Sales Channel'].isin(sales_channel))&(IB_filtered['Number \nof equipment\n(INST)']==1)&(IB_filtered['Contract Status']=='Under Contract')&(IB_filtered['Contract Nature']=='Standard')]), np.NaN]
-metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
-###Qty of Printers in Global IB MI Direct Under contract: Premium
-serie = ['Qty of Printers in Global IB MI Direct & Under contract: Premium',
-         len(IB[(IB['Sales Channel'].isin(sales_channel))&(IB['Number \nof equipment\n(INST)']==1)&(IB['Contract Status']=='Under Contract')&(IB['Contract Nature']=='Premium')]), 
-         len(IB_filtered[(IB_filtered['Sales Channel'].isin(sales_channel))&(IB_filtered['Number \nof equipment\n(INST)']==1)&(IB_filtered['Contract Status']=='Under Contract')&(IB_filtered['Contract Nature']=='Premium')]), np.NaN]
-metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
-###Qty of Printers in Global IB MI Direct Under contract: Access
-serie = ['Qty of Printers in Global IB MI Direct & Under contract: Access',
-         len(IB[(IB['Sales Channel'].isin(sales_channel))&(IB['Number \nof equipment\n(INST)']==1)&(IB['Contract Status']=='Under Contract')&(IB['Contract Nature']=='Access')]), 
-         len(IB_filtered[(IB_filtered['Sales Channel'].isin(sales_channel))&(IB_filtered['Number \nof equipment\n(INST)']==1)&(IB_filtered['Contract Status']=='Under Contract')&(IB_filtered['Contract Nature']=='Access')]), np.NaN]
-metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
-###Qty of Printers in Global IB MI Direct Under contract: Warranty Extension
-serie = ['Qty of Printers in Global IB MI Direct & Under contract: Warranty Extension',
-         len(IB[(IB['Sales Channel'].isin(sales_channel))&(IB['Number \nof equipment\n(INST)']==1)&(IB['Contract Status']=='Under Contract')&(IB['Contract Nature']=='Warranty Extension')]), 
-         len(IB_filtered[(IB_filtered['Sales Channel'].isin(sales_channel))&(IB_filtered['Number \nof equipment\n(INST)']==1)&(IB_filtered['Contract Status']=='Under Contract')&(IB_filtered['Contract Nature']=='Warranty Extension')]), np.NaN]
-metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
-###Qty of Printers in Global IB MI Direct Under contract: Rental
-serie = ['Qty of Printers in Global IB MI Direct & Under contract: Rental',
-         len(IB[(IB['Sales Channel'].isin(sales_channel))&(IB['Number \nof equipment\n(INST)']==1)&(IB['Contract Status']=='Under Contract')&(IB['Contract Nature']=='Rental')]), 
-         len(IB_filtered[(IB_filtered['Sales Channel'].isin(sales_channel))&(IB_filtered['Number \nof equipment\n(INST)']==1)&(IB_filtered['Contract Status']=='Under Contract')&(IB_filtered['Contract Nature']=='Rental')]), np.NaN]
-metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
-###Qty of Printers in Global IB MI Direct Under contract: Not assigned
-serie = ['Qty of Printers in Global IB MI Direct & Under contract: Not assigned',
-         len(IB[(IB['Sales Channel'].isin(sales_channel))&(IB['Number \nof equipment\n(INST)']==1)&(IB['Contract Status']=='Under Contract')&(IB['Contract Nature']=='Not assigned')]), 
-         len(IB_filtered[(IB['Sales Channel'].isin(sales_channel))&(IB_filtered['Number \nof equipment\n(INST)']==1)&(IB_filtered['Contract Status']=='Under Contract')&(IB_filtered['Contract Nature']=='Not assigned')]), np.NaN]
-metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
-
-
-
-################################Cs orders#######################################
-###qty cs order with sap mvt and qty==0
-cs_orders_qty_wo_parts_changed_sap = len(notif[notif['Quantity']==0]['CS Order ID'].unique())
-cs_orders_qty_wo_parts_changed_sap_filters = len(notif_filtered[notif_filtered['Quantity']==0]['CS Order ID'].unique())
-cs_orders_qty_wo_parts_changed_sap_filters_under_scope = len(notif_filtered_and_under_scope[notif_filtered_and_under_scope['Quantity']==0]['CS Order ID'].unique())
-serie = ['Qty of cs orders tracked in SAP with quantity = 0',
-         cs_orders_qty_wo_parts_changed_sap, cs_orders_qty_wo_parts_changed_sap_filters,
-         cs_orders_qty_wo_parts_changed_sap_filters_under_scope]
-metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
-
-####Qty cs orders without sap mvt
-cs_orders_qty_wo_sap = len(notif[~notif['CS Order ID'].isin(sap_mvt['Order'].unique())]['CS Order ID'].unique())
-cs_orders_qty_wo_sap_filters = len(notif_filtered[~notif_filtered['CS Order ID'].isin(sap_mvt['Order'].unique())]['CS Order ID'].unique())
-cs_orders_qty_wo_sap_filters_under_scope = len(notif_filtered_and_under_scope[~notif_filtered_and_under_scope['CS Order ID'].isin(sap_mvt['Order'].unique())]['CS Order ID'].unique())
-serie = ['Qty of cs orders not tracked in SAP',
-         cs_orders_qty_wo_sap, cs_orders_qty_wo_sap_filters,
-         cs_orders_qty_wo_sap_filters_under_scope]
-metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
-
-
-####Qty cs orders without sap mvt but replaced part in activity
-cs_orders_qty_wo_sap_w_replaced_part = len(notif[(~notif['CS Order ID'].isin(sap_mvt['Order'].unique()))&(notif['Activity']=='Replaced part')]['CS Order ID'].unique())
-cs_orders_qty_wo_sap_w_replaced_part_filters = len(notif_filtered[(~notif_filtered['CS Order ID'].isin(sap_mvt['Order'].unique()))&(notif_filtered['Activity']=='Replaced part')]['CS Order ID'].unique())
-cs_orders_qty_wo_sap_w_replaced_part_filters_under_scope = len(notif_filtered_and_under_scope[(~notif_filtered_and_under_scope['CS Order ID'].isin(sap_mvt['Order'].unique()))&(notif_filtered_and_under_scope['Activity']=='Replaced part')]['CS Order ID'].unique())
-serie = ['Qty of cs orders not tracked in SAP but replaced part in activity',
-         cs_orders_qty_wo_sap_w_replaced_part, cs_orders_qty_wo_sap_w_replaced_part_filters,
-         cs_orders_qty_wo_sap_w_replaced_part_filters_under_scope]
-metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
-
-
-
-####Percentage qty cs orders without sap mvt but replaced part in activity
-prct_cs_orders_qty_wo_sap_w_replaced_part = np.around(cs_orders_qty_wo_sap_w_replaced_part*100/cs_orders_qty_wo_sap,2)
-prct_cs_orders_qty_wo_sap_w_replaced_part_filters = np.around(cs_orders_qty_wo_sap_w_replaced_part_filters*100/cs_orders_qty_wo_sap_filters,2)
-prct_cs_orders_qty_wo_sap_w_replaced_part_filters_under_scope = np.around(cs_orders_qty_wo_sap_w_replaced_part_filters_under_scope*100/cs_orders_qty_wo_sap_filters_under_scope,2)
-serie = ['Percentage of qty of cs orders not tracked in SAP but replaced part in activity',
-         prct_cs_orders_qty_wo_sap_w_replaced_part, prct_cs_orders_qty_wo_sap_w_replaced_part_filters,
-         prct_cs_orders_qty_wo_sap_w_replaced_part_filters_under_scope]
-metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
-
-
-
-#######################Cs orders with 1 part changed################################
+########################################################################
+########################################################################
+############################# Block 9 ##################################
+########################################################################
+########################################################################
+#######################Cs orders with 1 part changed####################
 ###Qty Of Cs Order With 1 parts changed and qty =1
 qty_cs_1_part_changed = len(notif[(notif['Quantity']==1)&(notif['Number of parts changed']==1)]['CS Order ID'].unique())
 qty_cs_1_part_changed_filters = len(notif_filtered[(notif_filtered['Quantity']==1)&(notif_filtered['Number of parts changed']==1)]['CS Order ID'].unique())
 qty_cs_1_part_changed_filters_under_scope = len(notif_filtered_and_under_scope[(notif_filtered_and_under_scope['Quantity']==1)&(notif_filtered_and_under_scope['Number of parts changed']==1)]['CS Order ID'].unique())
-serie = ['Qty Of Cs Order With only 1 parts changed and quantity = 1',
-         qty_cs_1_part_changed, qty_cs_1_part_changed_filters,
+serie = ['Number Of Cs Order With only 1 parts changed and quantity = 1',
+         'Count distinct Cs Order ID from notifications file with only 1 parts changed and quantity = 1',
+         qty_cs_1_part_changed,
+         qty_cs_1_part_changed_filters,
          qty_cs_1_part_changed_filters_under_scope]
 metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
 
-###Qty Of Cs Order With only 1 parts changed and quantity <1
+
+###Qty Of Cs Order With only 1 parts changed and quantity between 0 and 1
 qty_cs_less_1_part_changed = len(notif[(notif['Quantity']>0)&(notif['Quantity']<1)&(notif['Number of parts changed']==1)]['CS Order ID'].unique())
 qty_cs_less_1_part_changed_filters = len(notif_filtered[(notif_filtered['Quantity']>0)&(notif_filtered['Quantity']<1)&(notif_filtered['Number of parts changed']==1)]['CS Order ID'].unique())
 qty_cs_less_1_part_changed_filters_under_scope = len(notif_filtered_and_under_scope[(notif_filtered_and_under_scope['Quantity']>0)&(notif_filtered_and_under_scope['Quantity']<1)&(notif_filtered_and_under_scope['Number of parts changed']==1)]['CS Order ID'].unique())
-serie = ['Qty Of Cs Order With only 1 parts changed and quantity <1',
+serie = ['Number Of Cs Order With only 1 parts changed and quantity < 1 and quantity > 0',
+         'Count distinct Cs Order ID from notifications file with only 1 parts changed and quantity > 1 and quantity < 0',
          qty_cs_less_1_part_changed, qty_cs_less_1_part_changed_filters,
          qty_cs_less_1_part_changed_filters_under_scope]
 metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
-
-###Qty Of Cs Order With more than one part changed or qty>1 for same part
-qty_cs_more_than_1_part_changed = len(notif[(notif['Number of parts changed']>1)]['CS Order ID'].unique()) + len(notif[(notif['Quantity']>1)&(notif['Number of parts changed']==1)]['CS Order ID'].unique())
-qty_cs_more_than_1_part_changed_filters = len(notif_filtered[(notif_filtered['Number of parts changed']>1)]['CS Order ID'].unique()) + len(notif_filtered[(notif_filtered['Quantity']>1)&(notif_filtered['Number of parts changed']==1)]['CS Order ID'].unique())
-qty_cs_more_than_1_part_changed_filters_under_scope = len(notif_filtered_and_under_scope[(notif_filtered_and_under_scope['Number of parts changed']>1)]['CS Order ID'].unique()) + len(notif_filtered_and_under_scope[(notif_filtered_and_under_scope['Quantity']>1)&(notif_filtered_and_under_scope['Number of parts changed']==1)]['CS Order ID'].unique())
-serie = ['Qty Of Cs Order With more than one part changed or qty>1 for same part',
-         qty_cs_more_than_1_part_changed, qty_cs_more_than_1_part_changed_filters,
-         qty_cs_more_than_1_part_changed_filters_under_scope]
-metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
-
-# #####
-# cs_orders_greater_1 = sum((list(notif[(notif['Quantity']>1)&(notif['Number of parts changed']==1)]['CS Order ID'].unique()), list(notif[(notif['Number of parts changed']>1)]['CS Order ID'].unique())), [])
-# cs_orders_equal_1 = list(notif[(notif['Quantity']==1)&(notif['Number of parts changed']==1)]['CS Order ID'].unique())
-# cs_orders_with_rep =  list(notif[notif['Quantity']>0]['CS Order ID'].unique())
-# missed_cs = [x for x in cs_orders_with_rep if (x not in cs_orders_greater_1) and (x not in cs_orders_equal_1) ]
-# ex = notif[notif['CS Order ID'].isin(missed_cs)]
-
-###Qty Of cs Order with quantity >1 for the same component
 
 print('-------------------------------------')
 print('Last steps')
@@ -566,28 +720,32 @@ for i, j in enumerate(tqdm(notif_filtered_and_under_scope['Notif. ID'].values)):
     if type(notif_filtered_and_under_scope.iloc[i]['Parts changed'])==dict:
         if any(list(map(lambda x: x>1, list(notif_filtered_and_under_scope.iloc[i]['Parts changed'].values())))):
             qty_notif_more_than_1_part_changed_same_component_filtered_and_under_scope+=1
-serie = ['Qty Of cs Order with quantity >1 for the same component',
-         qty_notif_more_than_1_part_changed_same_component, qty_notif_more_than_1_part_changed_same_component_filtered,
+
+serie = ['Number Of Cs Order With only 1 parts changed and quantity > 1',
+         'Count distinct CS Order ID with quantity >1 for the same component',
+         qty_notif_more_than_1_part_changed_same_component,
+         qty_notif_more_than_1_part_changed_same_component_filtered,
          qty_notif_more_than_1_part_changed_same_component_filtered_and_under_scope]
 metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
 
-##########################Qty material changed################################
-qty_material_changed = notif['Quantity'].sum()
-qty_material_changed_filters = notif_filtered['Quantity'].sum()
-qty_material_changed_filters_under_scope = notif_filtered_and_under_scope['Quantity'].sum()
-serie = ['Qty of Total Material Changed',
-         qty_material_changed, qty_material_changed_filters,
-         qty_material_changed_filters_under_scope]
-metrics = metrics.append(pd.Series(serie, index=metrics.columns), ignore_index=True)
 
 
-
+print('-------------------------------------')
+print('Saving file')
 type_printer = '9410'
 type_printer = '9018-28-29-9330'
-metrics.to_excel( r'C:\Users\mjmel\Desktop\Internship\Metrics\metrics_{}_{}.xlsx'.format(type_printer, str(date.today())), index = False)
+excel_path = r'C:\Users\mjmel\Desktop\Internship\Metrics\metrics_{}_{}.xlsx'.format(type_printer, str(date.today()))
 
 
+block_rows = []
+colors = []
+with pd.ExcelWriter(excel_path, mode='w', engine='xlsxwriter') as writer: 
+    sheet_name='metrics'
+    metrics.to_excel(writer, sheet_name=sheet_name, index=False)
+    format_tbl(writer, sheet_name, metrics)
 
-# # (notif_filtered['Quantity'].sum()-notif_filtered['Number of parts changed'].sum())*100/notif_filtered['Quantity'].sum()
 
-# len(notif_filtered[notif_filtered['Quantity']==notif_filtered['Number of parts changed']])*100/len(notif_filtered)
+print('-------------------------------------')
+print('End of calculation')
+
+
